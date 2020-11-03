@@ -2,6 +2,18 @@ import collections
 import inspect
 import itertools
 
+try:
+    import ipywidgets
+except ModuleNotFoundError:
+    # Not available so disable functionality
+    ipywidgets = None
+
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError:
+    # Not available so disable functionality
+    plt = None
+
 class Reactive:
     """
     >>> r = Reactive(
@@ -103,30 +115,6 @@ class Reactive:
             for other in depends:
                 self._depended[other].add(name)
 
-    def __getattr__(self, name):
-        if self._verbose:
-            self._log(f'Get attr: {name}')
-        if self._use_cache and name in self._cache:
-            return self._cache[name]
-        try:
-            val = self._vals[name]
-        except KeyError as e:
-            raise AttributeError from e
-        if isinstance(val, ReactiveObject):
-            dep = val._get_depends()
-            val = val._compute()
-            self._update_cache(name, val)
-            self._update_depends(name, dep)
-        return val
-
-    def __setattr__(self, name, value):
-        if self._verbose:
-            self._log(f'Set attr: {name}')
-        self._invalidate_cache_depends(name)
-        self._vals[name] = value
-        if not self._lazy_eval:
-            self._update(name)
-
     def _calculate_outer_branches(self, root):
         if self._verbose:
             self._log(f'Calculate outer branches: {root}')
@@ -145,13 +133,47 @@ class Reactive:
                 outer_branches.append(c)
         return outer_branches
 
-    def _update(self, name):
+    def _recalculate(self, name):
         if self._verbose:
-            self._log(f'Update: {name}')
-        outer_branches = self._calculate_outer_branches(name)
-        for other in outer_branches:
-            # we use a call to getattr to trigger a compute + cache
-            self.__getattr__(other)
+            self._log(f'Recalculate: {name}')
+        self._invalidate_cache_depends(name)
+        if not self._lazy_eval:
+            outer_branches = self._calculate_outer_branches(name)
+            for other in outer_branches:
+                # we use a call to getattr to trigger a compute + cache
+                self.__getattr__(other)
+
+    def _register_update_hook(self, name, value):
+        def hook():
+            self._recalculate(name)
+        value.register_update_hook(id(self), hook)
+
+    def __getattr__(self, name):
+        if self._verbose:
+            self._log(f'Get attr: {name}')
+        if self._use_cache and name in self._cache:
+            return self._cache[name]
+        try:
+            val = self._vals[name]
+        except KeyError as e:
+            raise AttributeError from e
+        if isinstance(val, ReactiveObject):
+            # there is currently no reason that the
+            # calculation of dep and val could not be
+            # merged
+            dep = val._get_depends()
+            val = val._compute()
+            self._update_cache(name, val)
+            self._update_depends(name, dep)
+        return val
+
+    def __setattr__(self, name, value):
+        if self._verbose:
+            self._log(f'Set attr: {name}')
+        self._vals[name] = value
+        if isinstance(value, UpdateHookMixin):
+            self._register_update_hook(name, value)
+        self._recalculate(name)
 
     def __delattr__(self, name):
         if self._verbose:
@@ -168,6 +190,11 @@ class Reactive:
     __setitem__ = __setattr__
     __delitem__ = __delattr__
 
+    def _to_getter(self, value):
+        if isinstance(value, str):
+            return ReactiveGetter(self, value)
+        return value
+
     def __call__(self, function, *args, **kwargs):
         if self._verbose:
             self._log(f'Call')
@@ -176,13 +203,15 @@ class Reactive:
         required_args = required_args[len(args):]
         required_args = [x for x in required_args if not x in kwargs]
         kwargs = {**kwargs, **{x: x for x in required_args}}
-        getter = lambda x: ReactiveGetter(self, x) if isinstance(x, str) else x
-        args = [getter(x) for x in args]
-        kwargs = {k: getter(v) for k, v in kwargs.items()}
+        args = [self._to_getter(x) for x in args]
+        kwargs = {k: self._to_getter(v) for k, v in kwargs.items()}
         return ReactiveOp(function, '', *args, **kwargs)
 
 
 class ReactiveObject:
+
+    def __init__(self):
+        super().__init__()
 
     def _get_depends(self):
         raise NotImplementedError
@@ -191,8 +220,70 @@ class ReactiveObject:
         raise NotImplementedError
 
 
+class UpdateHookMixin:
+
+    def __init__(self):
+        super().__init__()
+        self._hooks = {}
+
+    def register_update_hook(self, id_, function):
+        self._hooks[id_] = function
+
+    def trigger_update_hooks(self):
+        for name, function in self._hooks.items():
+            function()
+
+
+#class ConvertGetterHookMixin:
+
+#    def __init__(self):
+
+
+
+class ReactiveInteract(ReactiveObject, UpdateHookMixin):
+    def __init__(self, label, params):
+        """
+        :param label:  The label on the widget. Can be anything.
+        :param params: As accepted by ipywidgets.interact
+        """
+        if ipywidgets is None:
+            raise Exception("This functionality is not available"
+                            " without ipywidgets")
+        super().__init__()
+        self.value = None
+        self.widget_factory = ipywidgets.interact(
+            self.update, value=params
+        )
+        self.widget = self.widget_factory.widget.kwargs_widgets[0]
+        self.widget.description = label
+
+    def update(self, value):
+        self.value = value
+        self.trigger_update_hooks()
+
+    def _get_depends(self):
+        return set()
+
+    def _compute(self):
+        return self.value
+
+
+class ReactivePlot(ReactiveObject):
+    def __init__(self):
+        if plt is None:
+            raise Exception("This functionality is not available"
+                            " without matplotlib.pyplot")
+        super().__init__()
+
+    def _get_depends(self):
+        pass
+
+    def _compute(self):
+        pass
+
 class ReactiveGetter(ReactiveObject):
     def __init__(self, obj, name):
+        super().__init__()
         self._obj = obj
         self._name = name
 
@@ -205,6 +296,7 @@ class ReactiveGetter(ReactiveObject):
 
 class ReactiveOp(ReactiveObject):
     def __init__(self, obj, call, *args, **kwargs):
+        super().__init__()
         self._obj = obj
         self._call = call
         self._args = args
@@ -219,11 +311,15 @@ class ReactiveOp(ReactiveObject):
                 depends |= o._get_depends()
         return depends
 
+    def _compute_value(self, value):
+        if isinstance(value, ReactiveObject):
+            return value._compute()
+        return value
+
     def _compute(self):
-        comp = lambda x: x._compute() if isinstance(x, ReactiveObject) else x
-        args = [comp(x) for x in self._args]
-        kwargs = {k: comp(v) for k, v in self._kwargs.items()}
-        obj = comp(self._obj)
+        args = [self._compute_value(x) for x in self._args]
+        kwargs = {k: self._compute_value(v) for k, v in self._kwargs.items()}
+        obj = self._compute_value(self._obj)
         if self._call == '':
             return obj(*args, **kwargs)
         else:
