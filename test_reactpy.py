@@ -102,6 +102,11 @@ def test_del(r):
         r.a
     with pytest.raises(AttributeError):
         r.b  # checking cache invalidated
+    r.a = 3
+    r.b
+    del r['b']
+    with pytest.raises(AttributeError):
+        r.b
 
 def test_hasattr(r):
     r.a = 2

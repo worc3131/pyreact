@@ -2,6 +2,36 @@ import collections
 import inspect
 
 class Reactive:
+    """
+    >>> r = Reactive(
+    >>>     use_cache = True,  # cache intermediate values
+    >>>     lazy_cache = True, # wait until use to calculate
+    >>> )
+
+    Assign constants:
+    >>> r.a = 5
+    >>> r.b = 2
+
+    Or create and chain reactive components with position, keyword or implied.
+    >>> r.c = r(lambda x, y, z: x*y + z + 1, 'a', y='b', z=0)
+    >>> r.d = r(lambda b, a: a+b)
+
+    Get as expected.
+    >>> assert r.c == 11 (5*2 + 0 + 1)
+    >>> assert r.d == 7 (5+2)
+
+    Values will reactively update
+    >>> r.a = 0
+    >>> assert r.c == 1 (0*2 + 0 + 1)
+    >>> assert r.d == 2 (0+2)
+
+    Getitem, setitem, del and dir are also available
+    >>> r['b'] = 3
+    >>> assert r['b'] == 3
+    >>> del r['c']
+    >>> del r.d
+    >>> assert sorted(dir(r)) == ['a', 'b']
+    """
     def __init__(self, use_cache=True, lazy_cache=True):
         s = super().__setattr__
         s('_vals', {})
@@ -58,6 +88,7 @@ class Reactive:
 
     __getitem__ = __getattr__
     __setitem__ = __setattr__
+    __delitem__ = __delattr__
 
     def __call__(self, function, *args, **kwargs):
         required_args = [x for x in inspect.getfullargspec(function)[0] if

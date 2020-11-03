@@ -12,7 +12,8 @@ r.a, r.b = 3, 5
 r.c = r(lambda a, b: a*b)
 r.c  # 15 = 3*5
 r.a = 7 
-r.c  # 35 = 3*5 <- c has been updated reactively !!
+
+r.c  # 35 = 7*5 <- c has been updated reactively !!
 ```
 
 We create a reactive environment as `r = Reactive()`, we can then assign to this
@@ -72,9 +73,9 @@ import matplotlib.pylab as plt
 %matplotlib auto 
 plt.ioff()
 def plot(x, y):
-    f, ax = plt.subplots()
+    fig, ax = plt.subplots()
     ax.plot(x, y)
-    return f
+    return fig
 
 t = Reactive()
 r.a, r.b, r.c, r.d = 1, 0.5, 2, 1
