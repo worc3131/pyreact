@@ -1,12 +1,16 @@
 import collections
 import inspect
+import itertools
 
 class Reactive:
     """
     >>> r = Reactive(
-    >>>     use_cache = True,  # cache intermediate values
-    >>>     lazy_cache = True, # wait until use to calculate
+    >>>     use_cache = True, # cache intermediate values
+    >>>     lazy_eval = True, # wait until use to calculate
     >>> )
+
+    If use_cache and lazy_eval are both false, we still do full calculations on
+    each update, so we can confirm that there are no exceptions.
 
     Assign constants:
     >>> r.a = 5
@@ -32,36 +36,76 @@ class Reactive:
     >>> del r.d
     >>> assert sorted(dir(r)) == ['a', 'b']
     """
-    def __init__(self, use_cache=True, lazy_cache=True):
+    def __init__(self, use_cache=True, lazy_eval=True, verbose=False):
+        s = super().__setattr__
+        self._set_options(
+            use_cache=use_cache,
+            lazy_eval=lazy_eval,
+            verbose=verbose,
+        )
+        self._clear()
+
+    def _set_options(self, use_cache=None, lazy_eval=None, verbose=None):
+        s = super().__setattr__
+        if use_cache is not None:
+            s('_use_cache', use_cache)
+        if lazy_eval is not None:
+            s('_lazy_eval', lazy_eval)
+        if verbose is not None:
+            s('_verbose', verbose)
+
+    def _clear(self):
         s = super().__setattr__
         s('_vals', {})
-        s('_use_cache', use_cache)
-        s('_lazy_cache', lazy_cache)
         s('_cache', {})
         s('_depends', collections.defaultdict(set))
         s('_depended', collections.defaultdict(set))
 
-    def _update_cache(self, name, val, dep):
+    def _log(self, msg):
+        print(msg)
+
+    def _update_cache(self, name, val):
+        if self._verbose:
+            self._log(f'Update cache: {name}')
+        if self._use_cache:
+            self._cache[name] = val
+
+    def _update_depends(self, name, dep):
+        if self._verbose:
+            self._log(f'Update depends: {name}')
         assert all(x[0] == self for x in dep)
         dep = set([x[1] for x in dep])
-        self._cache[name] = val
-        for other in self._depends[name]:
-            self._depended[other].remove(name)
-        self._depends[name] = dep
-        for other in dep:
-            self._depended[other].add(name)
+        self._set_depends(name, dep)
+
+    def _invalidate_cache_depends(self, name):
+        if self._verbose:
+            self._log(f'Invalidate cache depends: {name}')
+        self._invalidate_cache(name)
+        self._set_depends(name, None)
 
     def _invalidate_cache(self, name):
+        if self._verbose:
+            self._log(f'Invalidate cache: {name}')
         if name in self._cache:
             del self._cache[name]
         for other in self._depended[name]:
             self._invalidate_cache(other)
-        if name in self._depended:
-            del self._depended[name]
-        if name in self._depends:
+
+    def _set_depends(self, name, depends):
+        if self._verbose:
+            self._log(f'Set depends: {name}')
+        for other in self._depends[name]:
+            self._depended[other].remove(name)
+        if depends is None:
             del self._depends[name]
+        else:
+            self._depends[name] = depends
+            for other in depends:
+                self._depended[other].add(name)
 
     def __getattr__(self, name):
+        if self._verbose:
+            self._log(f'Get attr: {name}')
         if self._use_cache and name in self._cache:
             return self._cache[name]
         try:
@@ -69,21 +113,55 @@ class Reactive:
         except KeyError as e:
             raise AttributeError from e
         if isinstance(val, ReactiveObject):
-            val, dep = val._compute()
-            self._update_cache(name, val, dep)
+            dep = val._get_depends()
+            val = val._compute()
+            self._update_cache(name, val)
+            self._update_depends(name, dep)
         return val
 
     def __setattr__(self, name, value):
-        self._invalidate_cache(name)
+        if self._verbose:
+            self._log(f'Set attr: {name}')
+        self._invalidate_cache_depends(name)
         self._vals[name] = value
-        if self._use_cache and not self._lazy_cache:
-            self.__getattr__(name)
+        if not self._lazy_eval:
+            self._update(name)
+
+    def _calculate_outer_branches(self, root):
+        if self._verbose:
+            self._log(f'Calculate outer branches: {root}')
+        outer_branches, seen = [], set()
+        frontier = collections.deque([root])
+        while len(frontier) > 0:
+            # breadth first search
+            c = frontier.popleft()
+            if c in seen:
+                continue
+            seen.add(c)
+            dep = self._depended[c]
+            if dep:
+                frontier.extend(dep)
+            else:
+                outer_branches.append(c)
+        return outer_branches
+
+    def _update(self, name):
+        if self._verbose:
+            self._log(f'Update: {name}')
+        outer_branches = self._calculate_outer_branches(name)
+        for other in outer_branches:
+            # we use a call to getattr to trigger a compute + cache
+            self.__getattr__(other)
 
     def __delattr__(self, name):
-        self._invalidate_cache(name)
+        if self._verbose:
+            self._log(f'Del attr: {name}')
+        self._invalidate_cache_depends(name)
         del self._vals[name]
 
     def __dir__(self):
+        if self._verbose:
+            self._log('Dir')
         return list(self._vals.keys())
 
     __getitem__ = __getattr__
@@ -91,19 +169,25 @@ class Reactive:
     __delitem__ = __delattr__
 
     def __call__(self, function, *args, **kwargs):
+        if self._verbose:
+            self._log(f'Call')
         required_args = [x for x in inspect.getfullargspec(function)[0] if
                          x != 'self']
         required_args = required_args[len(args):]
         required_args = [x for x in required_args if not x in kwargs]
         kwargs = {**kwargs, **{x: x for x in required_args}}
-        args = [ReactiveGetter(self, x) if isinstance(x, str) else x for x in args]
-        kwargs = {k: ReactiveGetter(self, v) if isinstance(v, str) else v for k, v in
-                  kwargs.items()}
+        getter = lambda x: ReactiveGetter(self, x) if isinstance(x, str) else x
+        args = [getter(x) for x in args]
+        kwargs = {k: getter(v) for k, v in kwargs.items()}
         return ReactiveOp(function, '', *args, **kwargs)
 
 
 class ReactiveObject:
-    def _compute():
+
+    def _get_depends(self):
+        raise NotImplementedError
+
+    def _compute(self):
         raise NotImplementedError
 
 
@@ -112,9 +196,11 @@ class ReactiveGetter(ReactiveObject):
         self._obj = obj
         self._name = name
 
+    def _get_depends(self):
+        return set([(self._obj, self._name)])
+
     def _compute(self):
-        return (getattr(self._obj, self._name),
-                set([(self._obj, self._name)]))
+        return getattr(self._obj, self._name)
 
 
 class ReactiveOp(ReactiveObject):
@@ -124,23 +210,21 @@ class ReactiveOp(ReactiveObject):
         self._args = args
         self._kwargs = kwargs
 
+    def _get_depends(self):
+        depends = set()
+        for o in itertools.chain(self._args,
+                                 self._kwargs.values(),
+                                 [self._obj]):
+            if isinstance(o, ReactiveObject):
+                depends |= o._get_depends()
+        return depends
+
     def _compute(self):
-        args = [x for x in self._args]
-        kwargs = self._kwargs.copy()
-        depend = set()
-        for i in range(len(args)):
-            if isinstance(args[i], ReactiveObject):
-                args[i], dep = args[i]._compute()
-                depend |= dep
-        for k in kwargs:
-            if isinstance(kwargs[k], ReactiveObject):
-                kwargs[k], dep = kwargs[k]._compute()
-                depend |= dep
-        obj = self._obj
-        if isinstance(obj, ReactiveObject):
-            obj, dep = obj._compute()
-            depend |= dep
+        comp = lambda x: x._compute() if isinstance(x, ReactiveObject) else x
+        args = [comp(x) for x in self._args]
+        kwargs = {k: comp(v) for k, v in self._kwargs.items()}
+        obj = comp(self._obj)
         if self._call == '':
-            return obj(*args, **kwargs), depend
+            return obj(*args, **kwargs)
         else:
-            return getattr(obj, self._call)(*args, **kwargs), depend
+            return getattr(obj, self._call)(*args, **kwargs)
