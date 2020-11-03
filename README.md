@@ -1,7 +1,7 @@
 # reactpy
 
-A simple implementation of a reactive environment with caching in Python, in the
-style of kdb views. It assumes that functions do not have side effects. 
+A simple implementation of a reactive environment, with caching, in Python (in 
+the style of kdb views). It assumes that functions do not have side effects. 
 Evaluation is lazy i.e. values are only calculated when needed. The cache and 
 lazy evaluation can be disabled if needed.
 
