@@ -17,7 +17,7 @@ r.c  # 35 = 7*5 <- c has been updated reactively !!
 ```
 
 We create a reactive environment as `r = Reactive()`, we can then assign to this
-static values as `r.a = 3` or reactive values as `r.b = r(lambda 2*a)`. Getting
+static values as `r.a = 3` or reactive values as `r.b = r(lambda a: 2*a)`. Getting
 `r.a` or `r.b` gives 3 and 6 respectively. `r['a']` and `r['a'] = 3` are also
 available if needed (as in the style of javascript).
 
