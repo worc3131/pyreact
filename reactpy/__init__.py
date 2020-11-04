@@ -206,6 +206,28 @@ class Reactive:
             self._log(f'Call')
         return Op(function, *args, **kwargs)
 
+    def context(self, **kwargs):
+        return ReactiveContext(self, **kwargs)
+
+class ReactiveContext:
+    def __init__(self, reactive, **kwargs):
+        self._reactive = reactive
+        self._kwargs = kwargs
+
+    def __enter__(self):
+        self._existing_kwargs = {
+            k: self._reactive._vals[k]
+            for k in self._kwargs
+            if k in self._reactive._vals
+        }
+        for k, v in self._kwargs.items():
+            self._reactive.__setattr__(k, v)
+
+    def __exit__(self, type, value, traceback):
+        for k, v in self._existing_kwargs.items():
+            self._reactive.__setattr__(k, v)
+        for k in [k for k in self._kwargs if not k in self._existing_kwargs]:
+            self._reactive.__delattr__(k)
 
 class ReactiveObject:
 

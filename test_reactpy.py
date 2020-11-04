@@ -323,3 +323,37 @@ def test_reactive_fn(r):
     assert r.b == 7
     r.a = lambda x: 0
     assert r.b == 0
+
+def test_context(r):
+    r.a = 2
+    r.b = r(lambda a: a*2)
+    assert r.b == 4
+    with r.context(a=3):
+        assert r.b == 6
+    assert r.b == 4
+
+def test_nested_context(r):
+    r.a = 1
+    r.b = 2
+    r.c = 3
+    r.d = r(lambda a, b, c: (a, b, c))
+    assert r.d == (1, 2, 3)
+    with r.context(a=4, b=5):
+        assert r.d == (4, 5, 3)
+        with r.context(a=6, c=7):
+            assert r.d == (6, 5, 7)
+        assert r.d == (4, 5, 3)
+        with r.context(a=8):
+            assert r.d == (8, 5, 3)
+        assert r.d == (4, 5, 3)
+        with r.context(b=9):
+            assert r.d == (4, 9, 3)
+        assert r.d == (4, 5, 3)
+    assert r.d == (1, 2, 3)
+
+def test_delete_context(r):
+    with r.context(a=5):
+        assert r.a == 5
+    with pytest.raises(AttributeError):
+        r.a
+    assert not hasattr(r, 'a')
