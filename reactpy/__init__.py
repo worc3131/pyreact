@@ -353,7 +353,7 @@ class Interact(ReactiveObject, UpdateHookMixin):
 
 
 class Plot(Op):
-    def __init__(self, plot_fn, ax=None, *args, **kwargs):
+    def __init__(self, plot_fn, *args, ax=None, **kwargs):
         if plt is None:
             raise Exception("This functionality is not available"
                             " without matplotlib.pyplot")
@@ -371,6 +371,7 @@ class Plot(Op):
     def _before_plot(self, ax):
         [l.remove() for l in ax.lines]
         [l.remove() for l in ax.patches]
+        ax.set_prop_cycle(None)
 
     def _after_plot(self, ax):
         ax.relim()
