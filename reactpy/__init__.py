@@ -69,6 +69,10 @@ class Reactive:
     def _clear(self):
         s = super().__setattr__
         s('_vals', {})
+        self._clear_cache()
+
+    def _clear_cache(self):
+        s = super().__setattr__
         s('_cache', {})
         s('_depends', collections.defaultdict(set))
         s('_depended', collections.defaultdict(set))
@@ -143,6 +147,11 @@ class Reactive:
                 # we use a call to getattr to trigger a compute + cache
                 self.__getattr__(other)
 
+    def _to_getter(self, value):
+        if isinstance(value, str):
+            return Getter(self, value)
+        return value
+
     def _register_update_hook(self, name, value):
         def hook():
             self._recalculate(name)
@@ -161,8 +170,8 @@ class Reactive:
             # there is currently no reason that the
             # calculation of dep and val could not be
             # merged
-            dep = val._get_depends()
-            val = val._compute()
+            dep = val.get_depends()
+            val = val.compute()
             self._update_cache(name, val)
             self._update_depends(name, dep)
         return val
@@ -171,6 +180,8 @@ class Reactive:
         if self._verbose:
             self._log(f'Set attr: {name}')
         self._vals[name] = value
+        if isinstance(value, ReactiveObjectWithArgs):
+            value.convert_string_to_getters(self._to_getter)
         if isinstance(value, UpdateHookMixin):
             self._register_update_hook(name, value)
         self._recalculate(name)
@@ -190,22 +201,10 @@ class Reactive:
     __setitem__ = __setattr__
     __delitem__ = __delattr__
 
-    def _to_getter(self, value):
-        if isinstance(value, str):
-            return ReactiveGetter(self, value)
-        return value
-
     def __call__(self, function, *args, **kwargs):
         if self._verbose:
             self._log(f'Call')
-        required_args = [x for x in inspect.getfullargspec(function)[0] if
-                         x != 'self']
-        required_args = required_args[len(args):]
-        required_args = [x for x in required_args if not x in kwargs]
-        kwargs = {**kwargs, **{x: x for x in required_args}}
-        args = [self._to_getter(x) for x in args]
-        kwargs = {k: self._to_getter(v) for k, v in kwargs.items()}
-        return ReactiveOp(function, '', *args, **kwargs)
+        return Op(function, *args, **kwargs)
 
 
 class ReactiveObject:
@@ -213,12 +212,67 @@ class ReactiveObject:
     def __init__(self):
         super().__init__()
 
-    def _get_depends(self):
+    def get_depends(self):
         raise NotImplementedError
 
-    def _compute(self):
+    def compute(self):
         raise NotImplementedError
 
+
+class ReactiveObjectWithArgs(ReactiveObject):
+
+    def __init__(self):
+        super().__init__()
+        self._args = []
+        self._kwargs = {}
+        self._extra_args = {}
+        self._converted = False
+
+    def _check_converted(self):
+        if not self._converted:
+            raise Exception("Reactive object has not been registered"
+                            " with a Reactive base")
+
+    def convert_string_to_getters(self, convert_function):
+        self._args = [convert_function(x)
+                     for x in self._args]
+        self._kwargs = {k:convert_function(v) for
+                       k,v in self._kwargs.items()}
+        self._extra_args = {k:convert_function(v)
+                           for k,v in self._extra_args.items()}
+        self._converted = True
+
+    def get_depends(self):
+        self._check_converted()
+        depends = set()
+        for o in itertools.chain(self._args,
+                                 self._kwargs.values(),
+                                 self._extra_args.values()):
+            if isinstance(o, ReactiveObject):
+                depends |= o.get_depends()
+        return depends
+
+    def _compute_value(self, value):
+        if isinstance(value, ReactiveObject):
+            return value.compute()
+        return value
+
+    def _compute_args(self):
+        args = [self._compute_value(x)
+                for x in self._args]
+        kwargs = {k: self._compute_value(v)
+                  for k, v in self._kwargs.items()}
+        extra_args = {k: self._compute_value(v)
+                      for k, v in self._extra_args.items()}
+        return args, kwargs, extra_args
+
+    def compute(self):
+        self._check_converted()
+        args, kwargs, extra_args = self._compute_args()
+        return self.compute_raw(args, kwargs, extra_args)
+
+    def compute_raw(self, args, kwargs, extra_args):
+        raise NotImplementedError
 
 class UpdateHookMixin:
 
@@ -234,13 +288,43 @@ class UpdateHookMixin:
             function()
 
 
-#class ConvertGetterHookMixin:
+class Getter(ReactiveObject):
+    def __init__(self, obj, name):
+        super().__init__()
+        self._obj = obj
+        self._name = name
 
-#    def __init__(self):
+    def get_depends(self):
+        return set([(self._obj, self._name)])
+
+    def compute(self):
+        return getattr(self._obj, self._name)
 
 
+def _fill_kwargs(function, args, kwargs, ignore=['self']):
+    if not isinstance(function, str):
+        required_args = [x for x in inspect.getfullargspec(function)[0] if
+                         x not in ignore]
+        required_args = required_args[len(args):]
+        required_args = [x for x in required_args if not x in kwargs]
+        kwargs = {**kwargs, **{x: x for x in required_args}}
+    return kwargs
 
-class ReactiveInteract(ReactiveObject, UpdateHookMixin):
+
+class Op(ReactiveObjectWithArgs):
+    def __init__(self, function, *args, **kwargs):
+        super().__init__()
+        kwargs = _fill_kwargs(function, args, kwargs)
+        self._args += args
+        self._kwargs = {**self._kwargs, **kwargs}
+        self._extra_args = {**self._extra_args, **{'function': function}}
+
+    def compute_raw(self, args, kwargs, extra_args):
+        function = extra_args['function']
+        return function(*args, **kwargs)
+
+
+class Interact(ReactiveObject, UpdateHookMixin):
     def __init__(self, label, params):
         """
         :param label:  The label on the widget. Can be anything.
@@ -252,75 +336,41 @@ class ReactiveInteract(ReactiveObject, UpdateHookMixin):
         super().__init__()
         self.value = None
         self.widget_factory = ipywidgets.interact(
-            self.update, value=params
+            self._update, value=params
         )
         self.widget = self.widget_factory.widget.kwargs_widgets[0]
         self.widget.description = label
 
-    def update(self, value):
+    def _update(self, value):
         self.value = value
         self.trigger_update_hooks()
 
-    def _get_depends(self):
+    def get_depends(self):
         return set()
 
-    def _compute(self):
+    def compute(self):
         return self.value
 
 
-class ReactivePlot(ReactiveObject):
-    def __init__(self):
+class Plot(Op):
+    def __init__(self, plot_fn, ax=None, *args, **kwargs):
         if plt is None:
             raise Exception("This functionality is not available"
                             " without matplotlib.pyplot")
-        super().__init__()
+        kwargs = _fill_kwargs(plot_fn, args, kwargs, ignore=['ax'])
+        if ax is None:
+            fig, ax = plt.subplots()
+        self.ax = ax
+        def update_fn(*args, **kwargs):
+            self._before_plot(ax)
+            r = plot_fn(ax=self.ax, *args, **kwargs)
+            self._after_plot(ax)
+            return r
+        super().__init__(update_fn, *args, **kwargs)
 
-    def _get_depends(self):
-        pass
+    def _before_plot(self, ax):
+        [l.remove() for l in ax.lines]
+        [l.remove() for l in ax.patches]
 
-    def _compute(self):
-        pass
-
-class ReactiveGetter(ReactiveObject):
-    def __init__(self, obj, name):
-        super().__init__()
-        self._obj = obj
-        self._name = name
-
-    def _get_depends(self):
-        return set([(self._obj, self._name)])
-
-    def _compute(self):
-        return getattr(self._obj, self._name)
-
-
-class ReactiveOp(ReactiveObject):
-    def __init__(self, obj, call, *args, **kwargs):
-        super().__init__()
-        self._obj = obj
-        self._call = call
-        self._args = args
-        self._kwargs = kwargs
-
-    def _get_depends(self):
-        depends = set()
-        for o in itertools.chain(self._args,
-                                 self._kwargs.values(),
-                                 [self._obj]):
-            if isinstance(o, ReactiveObject):
-                depends |= o._get_depends()
-        return depends
-
-    def _compute_value(self, value):
-        if isinstance(value, ReactiveObject):
-            return value._compute()
-        return value
-
-    def _compute(self):
-        args = [self._compute_value(x) for x in self._args]
-        kwargs = {k: self._compute_value(v) for k, v in self._kwargs.items()}
-        obj = self._compute_value(self._obj)
-        if self._call == '':
-            return obj(*args, **kwargs)
-        else:
-            return getattr(obj, self._call)(*args, **kwargs)
+    def _after_plot(self, ax):
+        ax.relim()

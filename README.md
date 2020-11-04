@@ -64,38 +64,23 @@ r.a = 10
 r.d.x  # 10
 ```
 
-A more advanced example:
-
+Using this framework we can cleanly create an interactive plot, with widget
+sliders as inputs and a plot that updates.
 ```
+from reactpy import Reactive, Interact, Plot
+
 import numpy as np
 import pandas as pd
-import matplotlib.pylab as plt
-%matplotlib auto 
-plt.ioff()
-def plot(x, y):
-    fig, ax = plt.subplots()
-    ax.plot(x, y)
-    return fig
+%matplotlib widget 
 
-r = Reactive()
-r.a, r.b, r.c, r.d = 1, 0.5, 2, 1
-r.space_max, r.space_step = 2*np.pi, 200
+r = Reactive(lazy_eval=False)
+for k in 'abcd':
+    r[k] = Interact(k, (-1, 5, 0.01))
+r.space_max, r.space_step = 10*np.pi, 2000
 r.space = r(lambda mn, mx, st: np.linspace(mn, mx, st), 0, 'space_max', 'space_step')
 r.x = r(lambda s,a,b: np.sin(s*a)*np.cos(s*b), s='space')
 r.y = r(lambda s,c,d: np.sin(s*c)*np.cos(s*d), s='space')
-r.plot = r(plot)
-r.plot.show()
-
-r.a = 2
-r.plot.show()
-
-fig, ax = plt.subplots(3,3)
-for i in range(3):
-    for j in range(3):
-        r.a, r.b = 1+i, 1+j  # update model
-        ax[i][j].plot(r.x, r.y)  # plot new results
-        ax[i][j].set_title(f'a={r.a} b={r.b}')
-fig.show()
+r.plot = Plot(lambda ax, x, y: ax.plot(x, y, color='red'));
 ```
 
 # Installation

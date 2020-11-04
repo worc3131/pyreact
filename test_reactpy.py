@@ -316,3 +316,10 @@ def test_num_calls_no_cache(r):
     r.a = 1
     assert r.e == 14
     assert calls == 15
+
+def test_reactive_fn(r):
+    r.a = lambda x: x+2
+    r.b = r('a', x=5)
+    assert r.b == 7
+    r.a = lambda x: 0
+    assert r.b == 0
