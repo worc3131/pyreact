@@ -14,6 +14,12 @@ except ModuleNotFoundError:
     # Not available so disable functionality
     plt = None
 
+try:
+    from matplotlib.animation import FuncAnimation
+except ModuleNotFoundError:
+    # Not available so disable functionality
+    FuncAnimation = None
+
 class Reactive:
     """
     >>> r = Reactive(
@@ -375,13 +381,15 @@ class Interact(ReactiveObject, UpdateHookMixin):
 
 
 class Plot(Op):
-    def __init__(self, plot_fn, *args, ax=None, **kwargs):
+    def __init__(self, plot_fn, *args, ax=None, init_fn=None, **kwargs):
         if plt is None:
             raise Exception("This functionality is not available"
                             " without matplotlib.pyplot")
         kwargs = _fill_kwargs(plot_fn, args, kwargs, ignore=['ax'])
         if ax is None:
             fig, ax = plt.subplots()
+        if init_fn is not None:
+            init_fn(ax=ax)
         self.ax = ax
         def update_fn(*args, **kwargs):
             self._before_plot(ax)
@@ -397,3 +405,45 @@ class Plot(Op):
 
     def _after_plot(self, ax):
         ax.relim()
+
+class Animation(Op):
+    def __init__(self, plot_fn, *args, fig=None,
+                 ax=None, init_fn=None, **kwargs):
+        if plt is None:
+            raise Exception("This functionality is not available"
+                            " without matplotlib.pyplot")
+        if FuncAnimation is None:
+            raise Exception("This functionality is not available"
+                            " without matplotlib FuncAnimation")
+        kwargs = _fill_kwargs(plot_fn, args, kwargs, ignore=['fig', 'ax'])
+        if fig is None and ax is None:
+            fig, ax = plt.subplots()
+        elif fig is None:
+            fig = ax.figure
+        elif ax is None:
+            ax = fig.subplots()
+        if init_fn is not None:
+            init_fn(fig=fig, ax=ax)
+        self.fig = fig
+        self.ax = ax
+        def update_fn(*args, **kwargs):
+            self._before_plot(fig, ax)
+            r = plot_fn(fig=self.fig, ax=self.ax, *args, **kwargs)
+            self._after_plot(fig, ax)
+            return r
+        self._extra_args = {**self._extra_args, **{'init_function': init_fn}}
+        super().__init__(update_fn, *args, **kwargs)
+
+    def _before_plot(self, fig, ax):
+        [l.remove() for l in ax.lines]
+        [l.remove() for l in ax.patches]
+        ax.set_prop_cycle(None)
+
+    def _after_plot(self, fig, ax):
+        ax.relim()
+
+    def compute_raw(self, args, kwargs, extra_args):
+        function = extra_args['function']
+        init_function = extra_args[]
+        return 1/0  # work in progress
+        # https://matplotlib.org/3.3.2/api/animation_api.html
