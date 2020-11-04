@@ -5,20 +5,18 @@ import itertools
 try:
     import ipywidgets
 except ModuleNotFoundError:
-    # Not available so disable functionality
-    ipywidgets = None
+    pass
 
 try:
+    import matplotlib
     import matplotlib.pyplot as plt
+    import matplotlib.animation
 except ModuleNotFoundError:
-    # Not available so disable functionality
-    plt = None
+    pass
 
-try:
-    from matplotlib.animation import FuncAnimation
-except ModuleNotFoundError:
-    # Not available so disable functionality
-    FuncAnimation = None
+def _check_module_imported(name):
+    if not name in locals():
+        raise Exception("This functionality is not available without " + name)
 
 class Reactive:
     """
@@ -331,8 +329,8 @@ class Getter(ReactiveObject):
 
 def _fill_kwargs(function, args, kwargs, ignore=['self']):
     if not isinstance(function, str):
-        required_args = [x for x in inspect.getfullargspec(function)[0] if
-                         x not in ignore]
+        required_args = [x for x in inspect.getfullargspec(function)[0]
+                         if x not in ignore]
         required_args = required_args[len(args):]
         required_args = [x for x in required_args if not x in kwargs]
         kwargs = {**kwargs, **{x: x for x in required_args}}
@@ -354,13 +352,7 @@ class Op(ReactiveObjectWithArgs):
 
 class Interact(ReactiveObject, UpdateHookMixin):
     def __init__(self, label, params):
-        """
-        :param label:  The label on the widget. Can be anything.
-        :param params: As accepted by ipywidgets.interact
-        """
-        if ipywidgets is None:
-            raise Exception("This functionality is not available"
-                            " without ipywidgets")
+        _check_module_imported('ipywidgets')
         super().__init__()
         self.value = None
         self.widget_factory = ipywidgets.interact(
@@ -382,9 +374,7 @@ class Interact(ReactiveObject, UpdateHookMixin):
 
 class Plot(Op):
     def __init__(self, plot_fn, *args, ax=None, init_fn=None, **kwargs):
-        if plt is None:
-            raise Exception("This functionality is not available"
-                            " without matplotlib.pyplot")
+        _check_module_imported('matplotlib')
         kwargs = _fill_kwargs(plot_fn, args, kwargs, ignore=['ax'])
         if ax is None:
             fig, ax = plt.subplots()
@@ -409,12 +399,7 @@ class Plot(Op):
 class Animation(Op):
     def __init__(self, plot_fn, *args, fig=None,
                  ax=None, init_fn=None, **kwargs):
-        if plt is None:
-            raise Exception("This functionality is not available"
-                            " without matplotlib.pyplot")
-        if FuncAnimation is None:
-            raise Exception("This functionality is not available"
-                            " without matplotlib FuncAnimation")
+        _check_module_imported('matplotlib')
         kwargs = _fill_kwargs(plot_fn, args, kwargs, ignore=['fig', 'ax'])
         if fig is None and ax is None:
             fig, ax = plt.subplots()
@@ -446,4 +431,5 @@ class Animation(Op):
         function = extra_args['function']
         init_function = extra_args[]
         return 1/0  # work in progress
+        # animation.FuncAnimation
         # https://matplotlib.org/3.3.2/api/animation_api.html
