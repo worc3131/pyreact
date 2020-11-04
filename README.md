@@ -80,7 +80,7 @@ r.space_max, r.space_step = 10*np.pi, 2000
 r.space = r(lambda mn, mx, st: np.linspace(mn, mx, st), 0, 'space_max', 'space_step')
 r.x = r(lambda s,a,b: np.sin(s*a)*np.cos(s*b), s='space')
 r.y = r(lambda s,c,d: np.sin(s*c)*np.cos(s*d), s='space')
-r.plot = Plot(lambda ax, x, y: ax.plot(x, y, color='red'));
+r.plot = Plot(lambda ax, x, y: ax.plot(x, y, color='red'))
 ```
 
 # Installation
