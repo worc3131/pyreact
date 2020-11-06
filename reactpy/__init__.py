@@ -1,6 +1,10 @@
+
 import collections
 import inspect
 import itertools
+import pathlib
+import threading
+import time
 
 try:
     import ipywidgets
@@ -370,10 +374,6 @@ class Op(ReactiveObjectWithArgs):
         function = extra_args['function']
         return function(*args, **kwargs)
 
-import pathlib
-import threading
-import time
-# TODO use mmap instead
 class FileData(ReactiveObject, UpdateHookMixin):
     def __init__(self, path, sleep=1):
         super().__init__()
