@@ -1,18 +1,30 @@
+
 import collections
 import inspect
 import itertools
+import pathlib
+import threading
+import time
 
 try:
     import ipywidgets
 except ModuleNotFoundError:
-    # Not available so disable functionality
-    ipywidgets = None
+    pass
 
 try:
+    import matplotlib
     import matplotlib.pyplot as plt
+    import matplotlib.animation
 except ModuleNotFoundError:
-    # Not available so disable functionality
-    plt = None
+    pass
+
+def _check_module_imported(name):
+    return
+    if not name in locals():
+        raise Exception("This functionality is not available without " + name)
+
+### Be warned. Some of the components of this library are experimental and
+### not thread safe.
 
 class Reactive:
     """
@@ -192,6 +204,9 @@ class Reactive:
         self._invalidate_cache_depends(name)
         del self._vals[name]
 
+    def __contains__(self, name):
+        return name in self._vals
+
     def __dir__(self):
         if self._verbose:
             self._log('Dir')
@@ -209,9 +224,23 @@ class Reactive:
     def context(self, **kwargs):
         return ReactiveContext(self, **kwargs)
 
+    def update(self, other):
+        for k, v in other.items():
+            self[k] = v
+
+    def get(self, name, default=None):
+        try:
+            return self[name]
+        except AttributeError:
+            return default
+
+    def items(self):
+        for name in dir(self):
+            yield name, self[name]
+
 class ReactiveContext:
-    def __init__(self, reactive, **kwargs):
-        self._reactive = reactive
+    def __init__(self, reactive__, **kwargs):
+        self._reactive = reactive__
         self._kwargs = kwargs
 
     def __enter__(self):
@@ -325,8 +354,8 @@ class Getter(ReactiveObject):
 
 def _fill_kwargs(function, args, kwargs, ignore=['self']):
     if not isinstance(function, str):
-        required_args = [x for x in inspect.getfullargspec(function)[0] if
-                         x not in ignore]
+        required_args = [x for x in inspect.getfullargspec(function)[0]
+                         if x not in ignore]
         required_args = required_args[len(args):]
         required_args = [x for x in required_args if not x in kwargs]
         kwargs = {**kwargs, **{x: x for x in required_args}}
@@ -345,16 +374,43 @@ class Op(ReactiveObjectWithArgs):
         function = extra_args['function']
         return function(*args, **kwargs)
 
+class FileData(ReactiveObject, UpdateHookMixin):
+    def __init__(self, path, sleep=1):
+        super().__init__()
+        self.value = None
+        self.path = pathlib.Path(path)
+        self.sleep = sleep
+        self.update_time = None
+        self._update()
+        self.thread = threading.Thread(target=self._thread_method)
+        self.alive = True
+        self.thread.start()
+
+    def _thread_method(self):
+        while self.alive:
+            time.sleep(self.sleep)
+            self._update()
+
+    def _update(self):
+        file_update_time = self.path.stat().st_mtime
+        if self.update_time is None or self.update_time < file_update_time:
+            with open(self.path, 'rb') as f:
+                self.value = f.read()
+            self.update_time = file_update_time
+            self.trigger_update_hooks()
+
+    def __del__(self):
+        self.alive = False
+
+    def get_depends(self):
+        return set()
+
+    def compute(self):
+        return self.value
 
 class Interact(ReactiveObject, UpdateHookMixin):
     def __init__(self, label, params):
-        """
-        :param label:  The label on the widget. Can be anything.
-        :param params: As accepted by ipywidgets.interact
-        """
-        if ipywidgets is None:
-            raise Exception("This functionality is not available"
-                            " without ipywidgets")
+        _check_module_imported('ipywidgets')
         super().__init__()
         self.value = None
         self.widget_factory = ipywidgets.interact(
@@ -375,13 +431,13 @@ class Interact(ReactiveObject, UpdateHookMixin):
 
 
 class Plot(Op):
-    def __init__(self, plot_fn, *args, ax=None, **kwargs):
-        if plt is None:
-            raise Exception("This functionality is not available"
-                            " without matplotlib.pyplot")
+    def __init__(self, plot_fn, *args, ax=None, init_fn=None, **kwargs):
+        _check_module_imported('matplotlib')
         kwargs = _fill_kwargs(plot_fn, args, kwargs, ignore=['ax'])
         if ax is None:
             fig, ax = plt.subplots()
+        if init_fn is not None:
+            init_fn(ax=ax)
         self.ax = ax
         def update_fn(*args, **kwargs):
             self._before_plot(ax)
@@ -397,3 +453,5 @@ class Plot(Op):
 
     def _after_plot(self, ax):
         ax.relim()
+
+
