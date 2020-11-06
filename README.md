@@ -87,6 +87,9 @@ r.plot = Plot(lambda ax, x, y: ax.plot(x, y, color='red'))
 
 # Installation
 
+WARNING: the input components in this library (File and Interact) are 
+experimental and not thread safe.
+
 1. Clone this repository and enter it
 2. Type `pip install .` to install it
 

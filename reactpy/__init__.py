@@ -15,8 +15,12 @@ except ModuleNotFoundError:
     pass
 
 def _check_module_imported(name):
+    return
     if not name in locals():
         raise Exception("This functionality is not available without " + name)
+
+### Be warned. Some of the components of this library are experimental and
+### not thread safe.
 
 class Reactive:
     """
@@ -196,6 +200,9 @@ class Reactive:
         self._invalidate_cache_depends(name)
         del self._vals[name]
 
+    def __contains__(self, name):
+        return name in self._vals
+
     def __dir__(self):
         if self._verbose:
             self._log('Dir')
@@ -213,9 +220,23 @@ class Reactive:
     def context(self, **kwargs):
         return ReactiveContext(self, **kwargs)
 
+    def update(self, other):
+        for k, v in other.items():
+            self[k] = v
+
+    def get(self, name, default=None):
+        try:
+            return self[name]
+        except AttributeError:
+            return default
+
+    def items(self):
+        for name in dir(self):
+            yield name, self[name]
+
 class ReactiveContext:
-    def __init__(self, reactive, **kwargs):
-        self._reactive = reactive
+    def __init__(self, reactive__, **kwargs):
+        self._reactive = reactive__
         self._kwargs = kwargs
 
     def __enter__(self):
@@ -349,6 +370,43 @@ class Op(ReactiveObjectWithArgs):
         function = extra_args['function']
         return function(*args, **kwargs)
 
+import pathlib
+import threading
+import time
+# TODO use mmap instead
+class FileData(ReactiveObject, UpdateHookMixin):
+    def __init__(self, path, sleep=1):
+        super().__init__()
+        self.value = None
+        self.path = pathlib.Path(path)
+        self.sleep = sleep
+        self.update_time = None
+        self._update()
+        self.thread = threading.Thread(target=self._thread_method)
+        self.alive = True
+        self.thread.start()
+
+    def _thread_method(self):
+        while self.alive:
+            time.sleep(self.sleep)
+            self._update()
+
+    def _update(self):
+        file_update_time = self.path.stat().st_mtime
+        if self.update_time is None or self.update_time < file_update_time:
+            with open(self.path, 'rb') as f:
+                self.value = f.read()
+            self.update_time = file_update_time
+            self.trigger_update_hooks()
+
+    def __del__(self):
+        self.alive = False
+
+    def get_depends(self):
+        return set()
+
+    def compute(self):
+        return self.value
 
 class Interact(ReactiveObject, UpdateHookMixin):
     def __init__(self, label, params):
@@ -429,7 +487,7 @@ class Animation(Op):
 
     def compute_raw(self, args, kwargs, extra_args):
         function = extra_args['function']
-        init_function = extra_args[]
+        init_function = extra_args['']
         return 1/0  # work in progress
         # animation.FuncAnimation
         # https://matplotlib.org/3.3.2/api/animation_api.html
