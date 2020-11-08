@@ -19,7 +19,6 @@ except ModuleNotFoundError:
     pass
 
 def _check_module_imported(name):
-    return
     if not name in locals():
         raise Exception("This functionality is not available without " + name)
 
@@ -443,7 +442,7 @@ class Plot(Op):
             self._before_plot(ax)
             r = plot_fn(ax=self.ax, *args, **kwargs)
             self._after_plot(ax)
-            return r
+            return ax
         super().__init__(update_fn, *args, **kwargs)
 
     def _before_plot(self, ax):
@@ -454,4 +453,18 @@ class Plot(Op):
     def _after_plot(self, ax):
         ax.relim()
 
+from threading import Lock
+class Output(Op):
+    def __init__(self, output_fn, *args, **kwargs):
+        _check_module_imported('ipywidgets')
+        kwargs = _fill_kwargs(output_fn, args, kwargs, ignore=['self'])
+        self.widget = ipywidgets.Output()
+        self.lock = Lock()
 
+        def update_fn(*args, **kwargs):
+            with self.lock:
+                r = output_fn(*args, **kwargs)
+                self.widget.clear_output() # why doesnt wait=True work?
+                self.widget.append_stdout(str(r))
+            return self.widget
+        super().__init__(update_fn, *args, **kwargs)
