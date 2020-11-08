@@ -3,6 +3,7 @@ import collections
 import inspect
 import itertools
 import pathlib
+import sys
 import threading
 import time
 
@@ -19,7 +20,7 @@ except ModuleNotFoundError:
     pass
 
 def _check_module_imported(name):
-    if not name in locals():
+    if not name in sys.modules:
         raise Exception("This functionality is not available without " + name)
 
 ### Be warned. Some of the components of this library are experimental and
@@ -446,8 +447,9 @@ class Plot(Op):
         super().__init__(update_fn, *args, **kwargs)
 
     def _before_plot(self, ax):
-        [l.remove() for l in ax.lines]
-        [l.remove() for l in ax.patches]
+        for grp in [ax.lines, ax.patches, ax.collections]:
+            while len(grp) > 0:
+                [x.remove() for x in grp]
         ax.set_prop_cycle(None)
 
     def _after_plot(self, ax):
