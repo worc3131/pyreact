@@ -287,10 +287,10 @@ class ReactiveObjectWithArgs(ReactiveObject):
     def convert_string_to_getters(self, convert_function):
         self._args = [convert_function(x)
                      for x in self._args]
-        self._kwargs = {k:convert_function(v) for
-                       k,v in self._kwargs.items()}
-        self._extra_args = {k:convert_function(v)
-                           for k,v in self._extra_args.items()}
+        self._kwargs = {k: convert_function(v) for
+                       k, v in self._kwargs.items()}
+        self._extra_args = {k: convert_function(v)
+                           for k, v in self._extra_args.items()}
         self._converted = True
 
     def get_depends(self):
