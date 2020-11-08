@@ -453,13 +453,12 @@ class Plot(Op):
     def _after_plot(self, ax):
         ax.relim()
 
-from threading import Lock
 class Output(Op):
     def __init__(self, output_fn, *args, **kwargs):
         _check_module_imported('ipywidgets')
         kwargs = _fill_kwargs(output_fn, args, kwargs, ignore=['self'])
         self.widget = ipywidgets.Output()
-        self.lock = Lock()
+        self.lock = threading.Lock()
 
         def update_fn(*args, **kwargs):
             with self.lock:
