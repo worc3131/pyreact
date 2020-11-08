@@ -1,5 +1,8 @@
 # reactpy
 
+WARNING: This library is not thread safe. Input and output components (FileData, 
+Interact and Plot) are experimental
+
 A simple implementation of a reactive environment, with caching, in Python (in 
 the style of kdb views). It assumes that functions do not have side effects. 
 Evaluation is lazy i.e. values are only calculated when needed. The cache and 
@@ -86,9 +89,6 @@ r.plot = Plot(lambda ax, x, y: ax.plot(x, y, color='red'))
 ```
 
 # Installation
-
-WARNING: the input components in this library (File and Interact) are 
-experimental and not thread safe.
 
 1. Clone this repository and enter it
 2. Type `pip install .` to install it
