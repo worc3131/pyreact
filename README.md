@@ -8,7 +8,7 @@ the style of kdb views). It assumes that functions do not have side effects.
 Evaluation is lazy i.e. values are only calculated when needed. The cache and 
 lazy evaluation can be disabled if needed.
 
-Interactive examples: https://mybinder.org/v2/gh/worc3131/pyreact_examples/HEAD
+Interactive examples: https://mybinder.org/v2/gh/worc3131/reactpy_examples/HEAD
 
 ```
 from reactpy import Reactive
